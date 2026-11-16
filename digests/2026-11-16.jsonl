@@ -1,0 +1,1 @@
+{"digest":{"schema":"lx-health-digest/1","device":{"id":"deadbeef0001","model":"self-check","android":"0"},"app":{"version":"1.9.2","build":307},"generated_at":"2026-11-16T22:44:35Z","window_hours":24,"probe":{"total":3,"ok":1},"play":{"total":0,"ok":0}},"issue":1,"ingested_at":"2026-11-16T22:44:51.658Z"}
