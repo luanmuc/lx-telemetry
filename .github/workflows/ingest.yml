@@ -1,0 +1,64 @@
+name: ingest-digest
+
+# 唯一入口：App 用 fine-grained PAT（仅 Issues: RW）在 luanmuc/lx-telemetry 开 issue。
+# 本仓公开，读无需凭据；写只走 issue，仓库内容由本 workflow 自己提交。
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: ingest-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    if: startsWith(github.event.issue.title, '[digest]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 校验 + 去重 + 落库
+        id: ingest
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: node scripts/ingest-digest.js
+
+      - name: 提交 digests（有变化才提交）
+        id: commit
+        run: |
+          git config user.name "lx-telemetry-bot"
+          git config user.email "lx-telemetry-bot@users.noreply.github.com"
+          git add digests
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit -m "digest: #${{ github.event.issue.number }} ${{ steps.ingest.outputs.file }}"
+          git push
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: 回执（成功/重复关闭，非法留开并说明）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NUM: ${{ github.event.issue.number }}
+          RESULT: ${{ steps.ingest.outputs.result }}
+          FILE: ${{ steps.ingest.outputs.file }}
+          REASON: ${{ steps.ingest.outputs.reason }}
+        run: |
+          if [ "$RESULT" = "ingested" ]; then
+            gh issue comment "$NUM" --body "✅ 已入库：\`$FILE\`"
+            gh issue close "$NUM"
+          elif [ "$RESULT" = "duplicate" ]; then
+            gh issue comment "$NUM" --body "ℹ️ 重复投递（同设备同时间点已存在），未重复写入：\`$FILE\`"
+            gh issue close "$NUM"
+          else
+            gh issue comment "$NUM" --body "❌ 校验未通过，未入库：$REASON"
+          fi
