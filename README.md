@@ -37,6 +37,7 @@ App（真机） --POST issue([digest] ...)--> lx-telemetry
 - body 超过 48KB 直接拒收（GitHub Issue body 上限 65536 字符）。
 - 未知字段一律拒收（改格式要同步改 `schema/digest.schema.json` 和 `scripts/ingest-digest.js`）。
 - 同一 `device.id + generated_at` 重复投递只记一次。
+- 并发：workflow 按**仓**串行（`concurrency: ingest-digest`），push 冲突自动 rebase 重试 3 次；App 侧另有 inFlight 单飞，双击不会发两条。
 
 ## 本地验证
 

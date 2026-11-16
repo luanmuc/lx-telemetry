@@ -10,8 +10,9 @@ permissions:
   contents: write
   issues: write
 
+# v1.0.1：并发按“仓”串行。原来的 per-issue 分组会让两台设备/两次提交同时 push → 后到者 fetch first 失败、Issue 永久留开。
 concurrency:
-  group: ingest-${{ github.event.issue.number }}
+  group: ingest-digest
   cancel-in-progress: false
 
 jobs:
@@ -42,7 +43,13 @@ jobs:
             exit 0
           fi
           git commit -m "digest: #${{ github.event.issue.number }} ${{ steps.ingest.outputs.file }}"
-          git push
+          # 串行后仍可能叠上人工提交；push 失败用 rebase 重试 3 次，避免一次竞态就把 Issue 留开。
+          for i in 1 2 3; do
+            git push && break
+            echo "push rejected, rebase retry $i"
+            git pull --rebase origin main
+            sleep $((i * 3))
+          done
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: 回执（成功/重复关闭，非法留开并说明）
