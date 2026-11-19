@@ -18,9 +18,18 @@ const KEEP_DAYS = 60
 function extractJson(body) {
   if (typeof body !== 'string' || !body.trim()) return { error: 'body 为空' }
   if (Buffer.byteLength(body, 'utf8') > MAX_BYTES) return { error: `body 超过 ${MAX_BYTES} 字节` }
-  const fence = body.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  const raw = fence ? fence[1] : body
-  try { return { digest: JSON.parse(raw) } } catch (e) { return { error: 'JSON 解析失败：' + e.message } }
+  // LT-06：原来只取第一个 fence。正文里若先有一段说明性示例片段，真正的 JSON 在后面就会被取错。
+  // 改为按出现顺序逐个尝试，返回第一个能解析成对象的；没有 fence 时退回整体解析。
+  const fences = [...body.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map(m => m[1])
+  const candidates = fences.length ? fences : [body]
+  let lastErr = null
+  for (const raw of candidates) {
+    try {
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return { digest: parsed }
+    } catch (e) { lastErr = e }
+  }
+  return { error: 'JSON 解析失败：' + (lastErr ? lastErr.message : '没有解析出对象') }
 }
 
 const isInt = (v, min, max) => Number.isInteger(v) && v >= min && v <= max
@@ -49,13 +58,20 @@ function validate(d) {
   if (d.schema !== SCHEMA) errs.push(`schema 必须为 ${SCHEMA}`)
   if (!isObj(d.device) || !/^[a-f0-9]{8,32}$/.test(String(d.device && d.device.id))) errs.push('device.id 非法（8~32 位小写 hex）')
   else if (d.device.model !== undefined && !isStr(d.device.model, 80)) errs.push('device.model 过长')
+  // LT-03：schema 声明 android 是 maxLength 40 的字符串，脚本原来完全不查（类型与长度都没校验），
+  // 两份真值不同步。这里补齐，与 schema 对齐。
+  if (d.device && d.device.android !== undefined && !isStr(d.device.android, 40)) errs.push('device.android 非法（1~40 字符字符串）')
   if (!keysOnly(d.device || {}, ['id', 'model', 'android'])) errs.push('device 含未知字段')
   if (!isObj(d.app) || !isStr(d.app.version, 32)) errs.push('app.version 非法')
   if (!keysOnly(d.app || {}, ['version', 'build'])) errs.push('app 含未知字段')
   if (d.app && d.app.build !== undefined && !isInt(d.app.build, 0, 999999)) errs.push('app.build 非法')
   const t = Date.parse(d.generated_at)
   if (!isStr(d.generated_at, 40) || Number.isNaN(t)) errs.push('generated_at 不是合法时间')
-  else if (Math.abs(Date.now() - t) > 30 * 864e5) errs.push('generated_at 偏离当前时间超过 30 天')
+  // LT-04：原来是绝对值容差，未来 29 天的时间戳同样合法 → 会直接产出未来日期的
+  // digests/<未来日>.jsonl，污染按天分文件与「只保留最近 60 个」的裁剪逻辑。
+  // 改为单向：只允许过去 30 天，正向仅容忍 5 分钟设备时钟漂移。
+  else if (Date.now() - t < -5 * 60e3) errs.push('generated_at 晚于当前时间超过 5 分钟（疑似设备时钟错乱）')
+  else if (Date.now() - t > 30 * 864e5) errs.push('generated_at 早于当前时间超过 30 天')
   if (!isInt(d.window_hours, 1, 168)) errs.push('window_hours 非 1~168 整数')
   validateCount(d.probe, 'probe', errs)
   validateCount(d.play, 'play', errs)
@@ -73,7 +89,20 @@ function validate(d) {
       if (!keysOnly(d.chain, ['total', 'ok', 'failures'])) errs.push('chain 含未知字段')
     }
   }
-  if (d.breaker !== undefined && !isObj(d.breaker)) errs.push('breaker 不是对象')
+  // LT-03：schema 对 breaker 的每个源项声明了 state(maxLength 20) 与 fail(0~9999)，
+  // 脚本原来只判「是不是对象」。补齐子结构校验，与 schema 对齐。
+  if (d.breaker !== undefined) {
+    if (!isObj(d.breaker)) errs.push('breaker 不是对象')
+    else for (const [src, v] of Object.entries(d.breaker)) {
+      if (!isObj(v)) errs.push(`breaker.${src} 不是对象`)
+      else {
+        if (v.state !== undefined && !isStr(v.state, 20)) errs.push(`breaker.${src}.state 非法（1~20 字符）`)
+        if (v.fail !== undefined && !isInt(v.fail, 0, 9999)) errs.push(`breaker.${src}.fail 非 0~9999 整数`)
+        if (!keysOnly(v, ['state', 'fail'])) errs.push(`breaker.${src} 含未知字段`)
+      }
+      if (src.length > 40) errs.push('breaker 源名过长')
+    }
+  }
   if (d.recent_events !== undefined) {
     if (!Array.isArray(d.recent_events) || d.recent_events.length > 500) errs.push('recent_events 非数组或超 500 条')
     else for (const e of d.recent_events) {
@@ -139,7 +168,9 @@ function main() {
   const out = ingest({ body: process.env.ISSUE_BODY || '', issue: process.env.ISSUE_NUMBER })
   console.log(JSON.stringify(out))
   const ghOut = process.env.GITHUB_OUTPUT
-  if (ghOut) fs.appendFileSync(ghOut, `result=${out.result}\nfile=${out.file || ''}\nreason=${(out.reason || '').replace(/\n/g, ' ')}\n`)
+  // LT-07：$GITHUB_OUTPUT 文件形式下 `%` 无特殊语义，真正的破坏者是换行（会把后续 `name=value`
+  // 拆成独立的非法行）。原来只替换 \n，补上 \r（Windows 侧拼进来的多行 reason 会带 \r\n）。
+  if (ghOut) fs.appendFileSync(ghOut, `result=${out.result}\nfile=${out.file || ''}\nreason=${(out.reason || '').replace(/[\r\n]+/g, ' ')}\n`)
   // invalid/duplicate 不算流程失败：workflow 会根据 result 决定评论与是否关闭
   process.exit(0)
 }
