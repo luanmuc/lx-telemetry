@@ -42,14 +42,18 @@ function validateCount(o, name, errs) {
   if (!isInt(o.total, 0, 2000)) errs.push(`${name}.total 非 0~2000 整数`)
   if (!isInt(o.ok, 0, 2000)) errs.push(`${name}.ok 非 0~2000 整数`)
   if (isInt(o.total, 0, 2000) && isInt(o.ok, 0, 2000) && o.ok > o.total) errs.push(`${name}.ok > total`)
-  if (o.by_source !== undefined) {
-    if (!isObj(o.by_source)) errs.push(`${name}.by_source 不是对象`)
-    else for (const [src, v] of Object.entries(o.by_source)) {
-      if (!keysOnly(v, ['total', 'ok']) || !isInt(v.total, 0, 2000) || !isInt(v.ok, 0, 2000)) errs.push(`${name}.by_source.${src} 非法`)
-      if (src.length > 40) errs.push(`${name}.by_source 源名过长`)
+  // v9.1.4：by_source 与 by_quality 同构，只有键长上限不同（档位名如 flac24bit 更短）
+  for (const bucket of ['by_source', 'by_quality']) {
+    const sub = o[bucket]
+    if (sub === undefined) continue
+    if (!isObj(sub)) { errs.push(`${name}.${bucket} 不是对象`); continue }
+    const maxKey = bucket === 'by_source' ? 40 : 12
+    for (const [k, v] of Object.entries(sub)) {
+      if (!keysOnly(v, ['total', 'ok']) || !isInt(v.total, 0, 2000) || !isInt(v.ok, 0, 2000)) errs.push(`${name}.${bucket}.${k} 非法`)
+      if (k.length > maxKey) errs.push(`${name}.${bucket} 键过长`)
     }
   }
-  if (!keysOnly(o, ['total', 'ok', 'by_source'])) errs.push(`${name} 含未知字段`)
+  if (!keysOnly(o, ['total', 'ok', 'by_source', 'by_quality'])) errs.push(`${name} 含未知字段`)
 }
 
 function validate(d) {
@@ -107,10 +111,16 @@ function validate(d) {
     if (!Array.isArray(d.recent_events) || d.recent_events.length > 500) errs.push('recent_events 非数组或超 500 条')
     else for (const e of d.recent_events) {
       if (!isObj(e) || !isStr(e.at, 40) || !isStr(e.kind, 40)) errs.push('recent_events 条目非法')
-      else if (!keysOnly(e, ['at', 'kind', 'source', 'code', 'ms'])) errs.push('recent_events 条目含未知字段')
+      else if (!keysOnly(e, ['at', 'kind', 'source', 'code', 'q', 'ms'])) errs.push('recent_events 条目含未知字段')
+      else if (e.q !== undefined && !isStr(e.q, 12)) errs.push('recent_events 条目 q 非法')
     }
   }
-  if (!keysOnly(d, ['schema', 'device', 'app', 'generated_at', 'window_hours', 'probe', 'play', 'chain', 'breaker', 'recent_events'])) errs.push('顶层含未知字段')
+  if (d.source !== undefined) {
+    if (!isObj(d.source)) errs.push('source 不是对象')
+    else if (!keysOnly(d.source, ['version'])) errs.push('source 含未知字段')
+    else if (d.source.version !== undefined && !isStr(d.source.version, 32)) errs.push('source.version 非法')
+  }
+  if (!keysOnly(d, ['schema', 'device', 'app', 'source', 'generated_at', 'window_hours', 'probe', 'play', 'chain', 'breaker', 'recent_events'])) errs.push('顶层含未知字段')
   return errs
 }
 

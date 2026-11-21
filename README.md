@@ -42,6 +42,8 @@ App（真机） --POST issue([digest] ...)--> lx-telemetry
 - **排队上限**：`concurrency` 按仓串行且 `cancel-in-progress: false`，同一 group 的待执行队列有上限（GitHub 侧限制），密集投递超出上限的运行会被丢弃，表现为「Issue 一直开着没人回执」。遇到这种情况重新投递同一份摘要即可（去重会挡住重复写入）。
 - `generated_at` 只接受**过去 30 天内**，正向仅容忍 5 分钟设备时钟漂移——避免产出未来日期的 `digests/<未来日>.jsonl` 污染按天分文件与 60 天裁剪。
 - `device.android`（≤40 字符）与 `breaker` 子结构（`state` ≤20 字符、`fail` 0~9999）现在**脚本与 schema 双向校验**，不再只靠 schema 声明。
+- **音质维度（App b195 起）**：`probe`/`play` 各多一个 `by_quality`（档位 → `{total, ok}`，档位名 ≤12 字符：`128k`/`320k`/`flac`/`flac24bit`/`unknown`），顶层多一个 `source: { version }`（≤32 字符），`recent_events` 每条多一个 `q`（档位，≤12）。三者都是**可选**：缺省的老包照常通过，聚合侧按「无音质信息」处理，不补零、不折算成失败。
+- **为什么必须加 `by_quality`**：只有 `by_source` 时，云端能看出「某源挂了」，看不出「只在 flac 档挂」。128k 通、flac 实返 mp3 这种降档虚标，在源维度是 100% 成功，在档位维度才是 0%——两者混在一起，等于把最该被抓的问题藏起来。
 
 ## 本地验证
 

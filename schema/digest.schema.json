@@ -24,6 +24,13 @@
       },
       "additionalProperties": false
     },
+    "source": {
+      "type": "object",
+      "properties": {
+        "version": { "type": "string", "maxLength": 32 }
+      },
+      "additionalProperties": false
+    },
     "generated_at": { "type": "string", "format": "date-time" },
     "window_hours": { "type": "integer", "minimum": 1, "maximum": 168 },
     "probe": {
@@ -33,6 +40,18 @@
         "total": { "type": "integer", "minimum": 0, "maximum": 2000 },
         "ok": { "type": "integer", "minimum": 0, "maximum": 2000 },
         "by_source": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["total", "ok"],
+            "properties": {
+              "total": { "type": "integer", "minimum": 0, "maximum": 2000 },
+              "ok": { "type": "integer", "minimum": 0, "maximum": 2000 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "by_quality": {
           "type": "object",
           "additionalProperties": {
             "type": "object",
@@ -54,6 +73,18 @@
         "total": { "type": "integer", "minimum": 0, "maximum": 2000 },
         "ok": { "type": "integer", "minimum": 0, "maximum": 2000 },
         "by_source": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["total", "ok"],
+            "properties": {
+              "total": { "type": "integer", "minimum": 0, "maximum": 2000 },
+              "ok": { "type": "integer", "minimum": 0, "maximum": 2000 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "by_quality": {
           "type": "object",
           "additionalProperties": {
             "type": "object",
@@ -113,6 +144,7 @@
           "kind": { "type": "string", "maxLength": 40 },
           "source": { "type": "string", "maxLength": 40 },
           "code": { "type": "string", "maxLength": 40 },
+          "q": { "type": "string", "maxLength": 12 },
           "ms": { "type": "integer", "minimum": 0, "maximum": 999999 }
         },
         "additionalProperties": false
