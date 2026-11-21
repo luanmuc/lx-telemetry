@@ -1,0 +1,35 @@
+name: test
+
+# 2026-11-20 新增：`node --test` 的 9 条用例此前只在本地存在，
+# ingest.yml 只做「校验 + 去重 + 落库」，从不跑测试。
+# digests/ 是 workflow 自己提交的产物，不触发本 workflow，避免自激。
+on:
+  push:
+    paths-ignore:
+      - 'digests/**'
+  pull_request:
+    paths-ignore:
+      - 'digests/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 单元测试（node --test）
+        run: node --test
+
+      - name: schema 可解析（schema/digest.schema.json）
+        run: node -e "const s=require('./schema/digest.schema.json'); if(!s) process.exit(1); console.log('schema ok:', s.title || s['$id'] || 'digest');"

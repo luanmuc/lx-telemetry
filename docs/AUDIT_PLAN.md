@@ -103,7 +103,7 @@ App 每天最多投一次「音源健康聚合包」→ 开 GitHub Issue → ing
 |---|---|---|---|
 | F1 | 现有 9 条用例覆盖主路径/去重/围栏/非法/上限/LT 回归 | 实跑 **9/0** | P1 / L1 |
 | F2 | 用例是否隔离（临时目录） | `DIGEST_DIR` 指向 `mkdtemp`，不污染仓库 | P1 / L0 |
-| F3 | 是否有 CI 跑测试 | **CI 存在但只跑 ingest，不跑 `node --test`**：9 条用例零执行点 | P0 缺口 |
+| F3 | 是否有 CI 跑测试 | **已补**：新增 `.github/workflows/test.yml`（`push`/`pull_request` 触发，`paths-ignore: digests/**` 避免自激），跑 `node --test` + schema 可解析。原状态是「只有 ingest、9 条用例零执行点」 | 已修复（2026-11-20） |
 
 ### G. 文档镜像（2 维）
 
@@ -125,7 +125,7 @@ App 每天最多投一次「音源健康聚合包」→ 开 GitHub Issue → ing
 
 | ID | 缺口 | 影响 | 建议 |
 |---|---|---|---|
-| GAP-1 | **CI 不跑测试**：`ingest.yml` 只有 4 个 step（校验/提交/回执/失败回执），9 条 `node --test` 零执行点 | schema 与实现漂移无人拦（改一处忘了另一处，直接线上拒收/放行脏数据） | 在 `ingest.yml` 加一个 `test` job 或独立 `ci.yml`：`node --test`（≈2s），零成本 |
+| GAP-1 | ~~CI 不跑测试~~ **已修复**：原 `ingest.yml` 只有 4 个 step，9 条 `node --test` 零执行点 | 同左（schema 与实现漂移无人拦） | 已落地独立 `test.yml`（不改 `ingest.yml`，避免影响 issue 触发链路）；`push`/`pull_request` 触发，`paths-ignore: digests/**` |
 | GAP-2 | 无 `docs/` 目录 | 契约只散在 README，改格式时无权威台账 | 本文件 + `STRESS_PLAN.md` 即补位 |
 | GAP-3 | 60 天归档全靠人工 | 数据无限增长；误删风险与体积风险由人承担 | 先加「超 60 天文件列表」检查脚本，删除仍手工 |
 | GAP-4 | schema 无 `$schema` 声明与自校验脚本 | 编辑器无法校验、CI 无法用 JSON Schema 校验 | 加 `scripts/validate-schema.js`（可选） |
@@ -149,4 +149,5 @@ node -e "..."                          # 本计划 A3~A8 / B2~B3 / C1 边界的�
 | 日期 | 变更 | 实跑证据 |
 |---|---|---|
 | 2026-11-20 | 首份审计计划建档（8 组 32 维 + 5 条缺口）；基线 `2cdb7f6`；同步新建 `STRESS_PLAN.md` | `node --test test/ingest.test.js` → **5 pass / 0 fail / 118ms**；`digests/2026-11-16.jsonl` 1 条真机数据 |
+| 2026-11-20 | 补 CI 测试执行点 | 新增 `test.yml`（job `unit`）：`node --test` 9 条 + `schema/digest.schema.json` 可解析；`paths-ignore: digests/**` 防自激 | GAP-1 / F3 关闭 |
 | 2026-11-20 | **基线前移到 `bc1901e`**（远端已有 LT-01~LT-07 修复，本轮 push 前 rebase 才看到）；改正建档时两处误判：①「无 CI」实为**有 `ingest.yml` 但只跑 ingest 不跑测试**；②用例数 5 → **9**。GAP-1 改写为「CI 不跑测试」 | `node --test` → **9 pass / 0 fail / 120ms**；`grep -c "      - name:" ingest.yml` → 4 step；`grep "node --test" ingest.yml` → 无命中 |
