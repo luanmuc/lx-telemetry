@@ -1,6 +1,6 @@
 # lx-telemetry 审计计划 v1.0 · 2026-11-20
 
-> 对象：`luanmuc/lx-telemetry`（公开仓），`main` 分支，基线 **`bc1901e`**（含 `d9eecce`「LT-01 落库失败仍宣告已入库」+ LT-02/03/04/06/07 收口）。
+> 对象：`luanmuc/lx-telemetry`（公开仓），`main` 分支，基线 **`d706359`**（HEAD，每日 digest 数据提交）；**代码基线 `5cdfe31`**（含 `d9eecce`「LT-01 落库失败仍宣告已入库」+ LT-02/03/04/06/07 收口）。
 >
 > **本文件是该仓的第一份审计计划**（此前只有 `README.md` 与 1 个测试脚本，无 `docs/` 目录）。定位：它是 App 与源仓之间唯一的**真机数据落点**，所以审计重点不是「代码多少」，而是**契约能不能被破坏、脏数据能不能混进来、证据会不会丢**。
 
@@ -10,12 +10,12 @@
 
 App 每天最多投一次「音源健康聚合包」→ 开 GitHub Issue → ingest workflow 校验 → 去重 → 追加 `digests/<日期>.jsonl` → 源仓 CI 每日拉 `raw` 做双端对照日报。
 
-| 项 | 实测（2026-11-20） |
+| 项 | 实测（2026-11-23） |
 |---|---|
-| 代码规模 | `scripts/ingest-digest.js` **149 行**、`schema/digest.schema.json` **123 行**、`test/ingest.test.js` **52 行**、`README.md` **51 行**（合计 375 行） |
-| 数据 | `digests/2026-11-16.jsonl`（**1 条真机数据**，`2cdb7f6` 清理后仅保留实际数据） |
-| 测试 | `node --test test/ingest.test.js` → **9 pass / 0 fail**（120ms，LT 修复后由 5 条扩至 9 条） |
-| CI | ingest workflow（`concurrency: ingest-digest` 仓级串行，push 冲突 rebase 重试 3 次） |
+| 代码规模 | `scripts/ingest-digest.js` **190 行**、`schema/digest.schema.json` **155 行**、`test/ingest.test.js` **106 行**、`README.md` **59 行**（合计 510 行）；另有压测 `test/ingest-stress.test.js` + `test/digests-integrity.test.js` |
+| 数据 | `digests/2026-11-21.jsonl` 1 条、`2026-11-22.jsonl` 1 条、`2026-11-23.jsonl` 3 条（共 **3 个日文件 / 5 条**，均为真机数据） |
+| 测试 | `node --test test/ingest.test.js` → **9 pass / 0 fail**（150ms）；含压测、T5 吞吐、完整性后 **41 pass / 0 fail**（862ms）；T5 1000 行 **73ms**、10000 行 **366ms**（每千行 37ms） |
+| CI | ingest workflow（`concurrency: ingest-digest` 仓级串行，push 冲突 rebase 重试 3 次）；另有 `test.yml` 跑 `node --test` |
 | 依赖 | 无 `package.json`，纯 Node 标准库 + `node:test` |
 
 **契约（README 明写的硬规则，审计必须逐条对应）**：
@@ -137,7 +137,10 @@ App 每天最多投一次「音源健康聚合包」→ 开 GitHub Issue → ing
 
 ```bash
 node --test test/ingest.test.js        # 现有 9 条，必须 9/0
-node -e "..."                          # 本计划 A3~A8 / B2~B3 / C1 边界的补充用例（待落成 stress 套件）
+node --test test/ingest-stress.test.js # T1~T4/T6，29 例
+node --test test/ingest-throughput.test.js # T5，1000/10000 行长测
+node --test test/digests-integrity.test.js # T7，证据完整性
+node --test                            # CI 入口：自动发现 4 个 *.test.js，共 41 例
 ```
 
 **退出标准**：`node --test` rc=0；schema 与实现字段差集为空；README 6 条硬规则逐条有对应断言；无新增自由文本字段。
@@ -148,6 +151,8 @@ node -e "..."                          # 本计划 A3~A8 / B2~B3 / C1 边界的�
 
 | 日期 | 变更 | 实跑证据 |
 |---|---|---|
+| 2026-11-23 | **R85b 补齐 T5 并落成 41 例**：新增 `test/ingest-throughput.test.js`；`isDuplicate` 从每次重扫整文件改为按文件 `size+mtimeMs` 缓存唯一键 Set，修掉 O(n²) | `node --test` **41/0 · 862ms**；T5.1 1000 行 **73ms**、T5.2 10000 行 **366ms**（每千行 37ms），落盘 1000/10000 行且逐行 JSON 可解析；CI `node --test` 自动发现 4 个测试文件 |
+| 2026-11-23 | **R85 基线刷新与实跑**：HEAD `d706359`（数据），代码基线 `5cdfe31`；规模更新为 190/155/106/59 行；数据 3 日文件 / 5 条；补压测与完整性套件后总用例 39 | `node --test test/ingest.test.js` **9/0**；`node --test test/ingest.test.js test/ingest-stress.test.js test/digests-integrity.test.js` **39/0 · 336ms**；无坏行 |
 | 2026-11-20 | 首份审计计划建档（8 组 32 维 + 5 条缺口）；基线 `2cdb7f6`；同步新建 `STRESS_PLAN.md` | `node --test test/ingest.test.js` → **5 pass / 0 fail / 118ms**；`digests/2026-11-16.jsonl` 1 条真机数据 |
 | 2026-11-20 | 补 CI 测试执行点 | 新增 `test.yml`（job `unit`）：`node --test` 9 条 + `schema/digest.schema.json` 可解析；`paths-ignore: digests/**` 防自激 | GAP-1 / F3 关闭 |
 | 2026-11-20 | **基线前移到 `bc1901e`**（远端已有 LT-01~LT-07 修复，本轮 push 前 rebase 才看到）；改正建档时两处误判：①「无 CI」实为**有 `ingest.yml` 但只跑 ingest 不跑测试**；②用例数 5 → **9**。GAP-1 改写为「CI 不跑测试」 | `node --test` → **9 pass / 0 fail / 120ms**；`grep -c "      - name:" ingest.yml` → 4 step；`grep "node --test" ingest.yml` → 无命中 |

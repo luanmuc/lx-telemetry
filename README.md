@@ -48,7 +48,8 @@ App（真机） --POST issue([digest] ...)--> lx-telemetry
 ## 本地验证
 
 ```bash
-node --test test/ingest.test.js   # 9 条用例（含 LT-03/04/06 回归）
+node --test                                    # 41 条：审计 9 + 压测 29 + T5 2 + 完整性 1
+node --test test/ingest-throughput.test.js     # T5 长测：1000 / 10000 行，每千行 <200ms
 ISSUE_BODY='{"schema":"lx-health-digest/1",...}' ISSUE_NUMBER=1 node scripts/ingest-digest.js
 ```
 

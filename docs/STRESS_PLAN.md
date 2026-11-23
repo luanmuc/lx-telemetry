@@ -1,6 +1,6 @@
 # lx-telemetry 压力测试计划 v1.0 · 2026-11-20
 
-> 对象：`luanmuc/lx-telemetry`（公开仓），`main`，基线 **`bc1901e`**（含 LT-01~LT-07 修复，用例已扩至 9 条）。
+> 对象：`luanmuc/lx-telemetry`（公开仓），`main`，基线 **`d706359`**（HEAD，每日 digest 数据提交）；**代码基线 `5cdfe31`**（含 LT-01~LT-07 修复，用例已扩至 9 条）。
 >
 > **本文件是该仓第一份压测计划。** 它没有服务、没有并发 API，压测对象是**入库函数的边界韧性**与**证据的不可损坏性**：脏 body 能不能被挡住、48KB 上限是不是真的、去重会不会把真数据也去重掉、巨量投递会不会把仓库撑爆。
 
@@ -40,7 +40,7 @@
 | T6 | 围栏提取 | 5 例（单围栏 / 多围栏 / ```text 围栏 / 围栏前后空行 / 未闭合围栏） | 取到正确 JSON 或明确 `invalid`，不误取 | L2 |
 | T7 | 证据完整性 | 对 `digests/*.jsonl` 全量扫描 | 每行合法 JSON；坏行=0 | L1 |
 
-**总计**：T1 5 + T2 8 + T3 7 + T4 4 + T6 5 = **29 例**新增（T5/T7 为计量项）。
+**总计**：T1 5 + T2 8 + T3 7 + T4 4 + T5 2 + T6 5 + T7 1 = **32 个压测/完整性用例**（加审计 9 例，共 **41 例**）。
 
 ---
 
@@ -48,16 +48,24 @@
 
 ```bash
 # 现有基线（必须先绿）
-node --test test/ingest.test.js           # 5/0
+node --test test/ingest.test.js           # 9/0
 
-# 新增压测（建议落成 test/ingest-stress.test.js，用 node:test 原生 runner）
+# 新增压测（test/ingest-stress.test.js，29 例）
 node --test test/ingest-stress.test.js    # T1~T4/T6，29 例
+
+# T5 追加吞吐长测（1000 / 10000 行）
+node --test test/ingest-throughput.test.js
 
 # 证据扫描
 node --test test/digests-integrity.test.js  # T7：逐行 JSON.parse
+
+# CI 入口（自动发现 4 个 *.test.js，共 41 例）
+node --test
 ```
 
 > 所有用例必须写入 `DIGEST_DIR` 的 `mkdtemp` 临时目录，**不得污染仓库 `digests/`**（现有 9 条用例已用此模式，照抄即可）。
+>
+> **T5 已落成 `test/ingest-throughput.test.js`**：T5.1 / T5.2 分别跑 1000 / 10000 行，断言每千行 <200ms、落盘行数一致、逐行可解析。日常 41 例包含这两个用例；长测在本机/CI 均单独可跑。
 
 ---
 
@@ -77,6 +85,8 @@ node --test test/digests-integrity.test.js  # T7：逐行 JSON.parse
 
 | 日期 | 基线 | 现有套件 | 备注 |
 |---|---|---|---|
+| 2026-11-23 | `d706359` / 代码 `5cdfe31` | **41 pass / 0 fail / 862ms** | 审计 9 + 压测 29 + T5 2 + 完整性 1；T5.1 1000 行 **73ms**、T5.2 10000 行 **366ms**（每千行 37ms），落盘 1000/10000 行、逐行可解析；`isDuplicate` 改为文件级 Set 缓存，修掉 O(n²) |
+| 2026-11-23 | `d706359` / 代码 `5cdfe31` | **39 pass / 0 fail / 336ms** | R85 首次实跑：审计 9 + 压测 29 + 完整性 1；T5 当时未落成，不伪报 |
 | 2026-11-20 | `bc1901e` | **9 pass / 0 fail / 120ms** | 基线取证（LT-01~LT-07 修复后）；新增 29 例待落成脚本 |
 | 2026-11-20 | `2cdb7f6` | 5 pass / 0 fail / 118ms | 建档时取证（当时远端尚未拉到 LT 修复） |
 | 2026-11-17 | `2cdb7f6` | — | 清理自检/重复行，仅留 1 条真机数据 |

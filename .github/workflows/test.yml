@@ -30,6 +30,7 @@ jobs:
 
       - name: 单元测试（node --test）
         run: node --test
+        # node --test 自动发现 test/*.test.js：当前 4 个文件 41 例（审计 9 + 压测 29 + T5 2 + 完整性 1）
 
       - name: schema 可解析（schema/digest.schema.json）
         run: node -e "const s=require('./schema/digest.schema.json'); if(!s) process.exit(1); console.log('schema ok:', s.title || s['$id'] || 'digest');"

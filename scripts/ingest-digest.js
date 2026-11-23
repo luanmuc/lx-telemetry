@@ -15,6 +15,39 @@ const ROOT = path.resolve(__dirname, '..')
 const DIR = () => process.env.DIGEST_DIR || path.join(ROOT, 'digests')
 const KEEP_DAYS = 60
 
+// T5：去重不能每来一条就把整文件重扫一遍。按「文件路径 + size + mtimeMs」缓存
+// (device.id, generated_at) 键集合；自身 append 后同步更新缓存，外部改写则按 stat 重建。
+// 进程级缓存只服务一次 CI ingest / 一次长测，不落盘、不影响跨进程并发（跨进程仍靠文件内容判重）。
+const dupeCache = new Map()
+const dupeKey = d => `${d.device.id}\u0000${d.generated_at}`
+
+function indexOf(file) {
+  let st
+  try { st = fs.statSync(file) } catch { return null }
+  const cached = dupeCache.get(file)
+  if (cached && cached.size === st.size && cached.mtimeMs === st.mtimeMs) return cached.keys
+  const keys = new Set()
+  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+    if (!line.trim()) continue
+    try {
+      const row = JSON.parse(line)
+      if (row.digest && row.digest.device && row.digest.generated_at) keys.add(dupeKey(row.digest))
+    } catch {}
+  }
+  dupeCache.set(file, { size: st.size, mtimeMs: st.mtimeMs, keys })
+  return keys
+}
+
+function rememberIngested(file, d) {
+  // 不能在这里再调 indexOf()：append 已让缓存 size/mtime 失效，会触发整文件重建（O(n²) 的根源）。
+  // 本进程的 append 是已知新增，直接复用缓存 Set；没有缓存时才在本次 append 后建一次索引。
+  const cached = dupeCache.get(file)
+  const keys = cached ? cached.keys : (indexOf(file) || new Set())
+  keys.add(dupeKey(d))
+  const st = fs.statSync(file)
+  dupeCache.set(file, { size: st.size, mtimeMs: st.mtimeMs, keys })
+}
+
 function extractJson(body) {
   if (typeof body !== 'string' || !body.trim()) return { error: 'body 为空' }
   if (Buffer.byteLength(body, 'utf8') > MAX_BYTES) return { error: `body 超过 ${MAX_BYTES} 字节` }
@@ -137,26 +170,15 @@ function recentFiles() {
 }
 
 function isDuplicate(d, file) {
-  if (!fs.existsSync(file)) return false
-  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
-    if (!line.trim()) continue
-    try {
-      const row = JSON.parse(line)
-      if (row.digest && row.digest.device && row.digest.device.id === d.device.id &&
-          row.digest.generated_at === d.generated_at) return true
-    } catch {}
-  }
+  const wanted = dupeKey(d)
+  const target = indexOf(file)
+  if (target && target.has(wanted)) return true
   // 跨日边界：同一 generated_at 可能落在前一天文件
   for (const f of recentFiles()) {
-    if (path.join(DIR(), f) === file) continue
-    for (const line of fs.readFileSync(path.join(DIR(), f), 'utf8').split('\n')) {
-      if (!line.trim()) continue
-      try {
-        const row = JSON.parse(line)
-        if (row.digest && row.digest.device && row.digest.device.id === d.device.id &&
-            row.digest.generated_at === d.generated_at) return true
-      } catch {}
-    }
+    const other = path.join(DIR(), f)
+    if (other === file) continue
+    const keys = indexOf(other)
+    if (keys && keys.has(wanted)) return true
   }
   return false
 }
@@ -171,6 +193,7 @@ function ingest({ body, issue }) {
   fs.mkdirSync(DIR(), { recursive: true })
   const row = { digest: ex.digest, issue: Number(issue) || null, ingested_at: new Date().toISOString() }
   fs.appendFileSync(file, JSON.stringify(row) + '\n')
+  rememberIngested(file, ex.digest)
   return { result: 'ingested', file: path.relative(ROOT, file) }
 }
 
